@@ -3,138 +3,141 @@
 # Set fixed team number
 TEAM_NUMBER=6
 
-# Prompt for domain name and name server IP
-read -p "Enter the domain name (e.g., team6.net): " domain
-read -p "Enter the IP address of the name server (e.g., 192.168.6.12): " ip_address
-read -p "Enter the name of the user on the DNS server: " username
+# Define domain names
+INTERNAL_DOMAIN="team6.net"
+EXTERNAL_DOMAIN="team6.ncaecybergames.org"
 
-# Define paths for Rocky Linux 8
-zones_folder="/var/named/zones"
-forward_file="$zones_folder/forward.$domain"
-reverse_file="$zones_folder/reverse.$domain"
-external_forward_file="$zones_folder/external.forward.$domain"
-external_reverse_file="$zones_folder/external.reverse.$domain"
+# Define static IP addresses
+INTERNAL_NS_IP="192.168.$TEAM_NUMBER.12"
+EXTERNAL_NS_IP="172.18.13.$TEAM_NUMBER"
 
-# Ensure the zones folder exists
-if [ ! -d "$zones_folder" ]; then
-    sudo mkdir -p "$zones_folder"
-    sudo chown -R named:named "$zones_folder"
-    sudo chmod 750 "$zones_folder"
+# Define paths
+ZONES_DIR="/var/named/zones"
+NAMED_CONF="/etc/named.conf"
+
+# Ensure the zones directory exists
+if [ ! -d "$ZONES_DIR" ]; then
+    sudo mkdir -p "$ZONES_DIR"
+    sudo chown -R named:named "$ZONES_DIR"
+    sudo chmod 750 "$ZONES_DIR"
 fi
 
-# Determine reverse lookup zone
-reverse_zone=$(echo $ip_address | awk -F. '{print $3"."$2"."$1}')
-reverse_file="$zones_folder/$reverse_zone.in-addr.arpa"
+# Define zone file paths
+FORWARD_INTERNAL="$ZONES_DIR/forward.$INTERNAL_DOMAIN"
+REVERSE_INTERNAL="$ZONES_DIR/reverse.$INTERNAL_DOMAIN"
+FORWARD_EXTERNAL="$ZONES_DIR/external.forward.$EXTERNAL_DOMAIN"
+REVERSE_EXTERNAL="$ZONES_DIR/external.reverse.$EXTERNAL_DOMAIN"
 
-# Copy named.empty as a base template for all zone files
-sudo cp /var/named/named.empty "$forward_file"
-sudo cp /var/named/named.empty "$reverse_file"
-sudo cp /var/named/named.empty "$external_forward_file"
-sudo cp /var/named/named.empty "$external_reverse_file"
+# Copy named.empty as a base template
+sudo cp /var/named/named.empty "$FORWARD_INTERNAL"
+sudo cp /var/named/named.empty "$REVERSE_INTERNAL"
+sudo cp /var/named/named.empty "$FORWARD_EXTERNAL"
+sudo cp /var/named/named.empty "$REVERSE_EXTERNAL"
 
-# Populate the forward lookup file
-sudo bash -c "cat <<EOF > $forward_file
+# Internal Forward Lookup Zone (team6.net)
+sudo bash -c "cat <<EOF > $FORWARD_INTERNAL
 \$TTL 86400
-@   IN  SOA  ns1.$domain. admin.$domain. (
-        $(date +%Y%m%d%H) ; Serial
-        604800         ; Refresh
-        86400         ; Retry
-        2419200       ; Expire
-        86400 )      ; Minimum TTL
-
-; Name Servers
-@       IN  NS  ns1.$domain.
-ns1     IN  A   $ip_address
-www     IN  A   192.168.6.5
-db      IN  A   192.168.6.7
-backup  IN  A   192.168.6.15
-EOF"
-
-# Populate the reverse lookup file
-sudo bash -c "cat <<EOF > $reverse_file
-\$TTL 86400
-@   IN  SOA ns1.$domain. admin.$domain. (
-        $(date +%Y%m%d%H) ; Serial
-        3600         ; Refresh
-        1800         ; Retry
-        604800       ; Expire
-        86400 )      ; Minimum TTL
-
-; Reverse Lookup
-@       IN  NS  ns1.$domain.
-12      IN  PTR ns1.$domain.
-5       IN  PTR www.$domain.
-7       IN  PTR db.$domain.
-15      IN  PTR backup.$domain.
-EOF"
-
-# Populate the external forward lookup file
-sudo bash -c "cat <<EOF > $external_forward_file
-\$TTL 86400
-@   IN  SOA  ns1.$domain. admin.$domain. (
-        $(date +%Y%m%d%H) ; Serial
+@   IN  SOA  ns1.$INTERNAL_DOMAIN. admin.$INTERNAL_DOMAIN. (
+        $(date +%Y%m%d%H)
         3600
         1800
         604800
         86400 )
 
-@       IN  NS  ns1.$domain.
-ns1     IN  A   172.18.13.6
-www     IN  A   172.18.13.6
+@       IN  NS  ns1.$INTERNAL_DOMAIN.
+ns1     IN  A   $INTERNAL_NS_IP
+www     IN  A   192.168.6.5
+db      IN  A   192.168.6.7
+EOF"
+
+# Internal Reverse Lookup Zone
+sudo bash -c "cat <<EOF > $REVERSE_INTERNAL
+\$TTL 86400
+@   IN  SOA  ns1.$INTERNAL_DOMAIN. admin.$INTERNAL_DOMAIN. (
+        $(date +%Y%m%d%H)
+        3600
+        1800
+        604800
+        86400 )
+
+@       IN  NS  ns1.$INTERNAL_DOMAIN.
+12      IN  PTR ns1.$INTERNAL_DOMAIN.
+5       IN  PTR www.$INTERNAL_DOMAIN.
+7       IN  PTR db.$INTERNAL_DOMAIN.
+EOF"
+
+# External Forward Lookup Zone
+sudo bash -c "cat <<EOF > $FORWARD_EXTERNAL
+\$TTL 86400
+@   IN  SOA  ns1.$EXTERNAL_DOMAIN. admin.$EXTERNAL_DOMAIN. (
+        $(date +%Y%m%d%H)
+        3600
+        1800
+        604800
+        86400 )
+
+@       IN  NS  ns1.$EXTERNAL_DOMAIN.
+ns1     IN  A   $EXTERNAL_NS_IP
+www     IN  A   $EXTERNAL_NS_IP
 shell   IN  A   172.18.14.6
 files   IN  A   172.18.14.7
 EOF"
 
-# Populate the external reverse lookup file
-sudo bash -c "cat <<EOF > $external_reverse_file
+# External Reverse Lookup Zone
+sudo bash -c "cat <<EOF > $REVERSE_EXTERNAL
 \$TTL 86400
-@   IN  SOA  ns1.$domain. admin.$domain. (
-        $(date +%Y%m%d%H) ; Serial
+@   IN  SOA  ns1.$EXTERNAL_DOMAIN. admin.$EXTERNAL_DOMAIN. (
+        $(date +%Y%m%d%H)
         3600
         1800
         604800
         86400 )
 
-@       IN  NS  ns1.$domain.
-6       IN  PTR ns1.$domain.
-14      IN  PTR shell.$domain.
+@       IN  NS  ns1.$EXTERNAL_DOMAIN.
+6       IN  PTR ns1.$EXTERNAL_DOMAIN.
+14      IN  PTR shell.$EXTERNAL_DOMAIN.
 EOF"
 
-# Ensure correct permissions
-sudo chown -R named:named "$zones_folder"
-sudo chmod 640 "$zones_folder"/*
+# Set correct permissions
+sudo chown -R named:named "$ZONES_DIR"
+sudo chmod 640 "$ZONES_DIR"/*
 
-# Update named.conf to reference new zone files
-sudo bash -c "cat <<EOF >> /etc/named.conf
+# Add zone configurations to named.conf
+sudo bash -c "cat <<EOF >> $NAMED_CONF
 
-zone \"$domain\" IN {
+zone \"$INTERNAL_DOMAIN\" IN {
     type master;
-    file \"zones/forward.$domain\";
+    file \"zones/forward.$INTERNAL_DOMAIN\";
 };
 
 zone \"6.168.192.in-addr.arpa\" IN {
     type master;
-    file \"zones/reverse.$domain\";
+    file \"zones/reverse.$INTERNAL_DOMAIN\";
 };
 
-zone \"$domain.ncaecybergames.org\" IN {
+zone \"$EXTERNAL_DOMAIN\" IN {
     type master;
-    file \"zones/external.forward.$domain\";
+    file \"zones/external.forward.$EXTERNAL_DOMAIN\";
 };
 
 zone \"13.18.172.in-addr.arpa\" IN {
     type master;
-    file \"zones/external.reverse.$domain\";
+    file \"zones/external.reverse.$EXTERNAL_DOMAIN\";
 };
 EOF"
 
-# Restart DNS service
+# Restart and enable BIND
 sudo systemctl restart named
 sudo systemctl enable named
 
+# Open firewall for DNS
+sudo firewall-cmd --add-service=dns --permanent
+sudo firewall-cmd --reload
+
 # Display success message
-echo "DNS Zone Configuration Completed!"
-echo "Forward Zone: $forward_file"
-echo "Reverse Zone: $reverse_file"
-echo "External Forward Zone: $external_forward_file"
-echo "External Reverse Zone: $external_reverse_file"
+echo "DNS Configuration Completed!"
+echo "Internal Forward Zone: $FORWARD_INTERNAL"
+echo "Internal Reverse Zone: $REVERSE_INTERNAL"
+echo "External Forward Zone: $FORWARD_EXTERNAL"
+echo "External Reverse Zone: $REVERSE_EXTERNAL"
+
