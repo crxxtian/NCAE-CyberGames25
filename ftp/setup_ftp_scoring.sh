@@ -1,11 +1,14 @@
 #!/bin/bash
 # setup_ftp_scoring.sh
 #
-# This script configures FTP on a Rocky Linux server (Rocky 8/9)
-# to meet the competition requirements:
+# This script configures FTP on a Rocky Linux server (Rocky 8)
+# to meet competition requirements:
 # - FTP Scoring Directory: /mnt/files
-# - FTP Scoring Users (listed below) are created with the provided password hash.
-# - vsftpd is installed and configured to allow local user logins via FTP.
+# - Scoring users are ensured to exist with home directory (/home/$user) and a valid shell (/bin/bash)
+#   and are added to the ftpusers group.
+# - Users' password is set using the provided password hash.
+# - vsftpd is installed and configured to allow local user logins via FTP,
+#   chrooting them to /mnt/files regardless of their home directory.
 #
 # Usage:
 #   chmod +x setup_ftp_scoring.sh
@@ -34,7 +37,7 @@ FTP_GROUP="ftpusers"
 # Password hash for FTP scoring users
 PASSWORD_HASH='$6$KHk2hJlrIZKWxWA9$z2OrpVg05wxoUp/BL12VY9rvxvgyZhta.qKf9SwckeNMcW4QvCJACSA4QyBwy88UpPAGDrskbu7rb7sh8fbnM1'
 
-# List of FTP scoring users
+# List of FTP scoring users (same as SSH users)
 FTP_USERS=(
   "camille_jenatzy"
   "gaston_chasseloup"
@@ -72,16 +75,16 @@ if ! getent group "$FTP_GROUP" > /dev/null; then
 fi
 
 echo "Creating/updating FTP scoring users..."
-# Create FTP scoring users or update them if they already exist.
 for user in "${FTP_USERS[@]}"; do
+  # Check if user exists; if not, create with home directory /home/$user and shell /bin/bash.
   if id "$user" &>/dev/null; then
-    echo "User $user exists; updating password and group membership."
+    echo "User $user exists; updating password and ensuring group membership."
     usermod -p "$PASSWORD_HASH" "$user"
+    # Append the user to the ftpusers group if not already a member.
     usermod -a -G "$FTP_GROUP" "$user"
   else
-    echo "Creating user $user..."
-    # Set home directory to FTP_DIR and disable shell access.
-    useradd -m -d "$FTP_DIR" -s /sbin/nologin -g "$FTP_GROUP" -p "$PASSWORD_HASH" "$user"
+    echo "Creating user $user with home directory /home/$user and shell /bin/bash"
+    useradd -m -s /bin/bash "$user" -G "$FTP_GROUP" -p "$PASSWORD_HASH"
   fi
 done
 
@@ -91,8 +94,7 @@ if [ ! -d "$FTP_DIR" ]; then
   mkdir -p "$FTP_DIR"
 fi
 
-# Set ownership and permissions.
-# For chrooted FTP, the home directory should be owned by root and not writable by the user.
+# Set ownership and permissions for the FTP directory.
 chown root:"$FTP_GROUP" "$FTP_DIR"
 chmod 755 "$FTP_DIR"
 
@@ -103,7 +105,6 @@ if [ -f "$VSFTPD_CONF" ]; then
 fi
 
 echo "Writing new vsftpd configuration..."
-# Configure vsftpd securely for local users.
 cat > "$VSFTPD_CONF" <<EOF
 listen=YES
 anonymous_enable=NO
@@ -124,9 +125,8 @@ systemctl enable vsftpd
 systemctl restart vsftpd
 
 echo "Configuring firewall for FTP access..."
-# Open FTP service in the firewall.
 firewall-cmd --permanent --add-service=ftp
 firewall-cmd --reload
 
-echo "FTP configuration complete."
-echo "Scoring users should now be able to log in via FTP."
+echo "FTP configuration complete. Scoring users should now be able to log in via FTP."
+
