@@ -35,9 +35,15 @@ if [ ! -d /var/named/zones ]; then
     chmod 750 /var/named/zones
 fi
 
-# Apply SELinux context for BIND
-semanage fcontext -a -t named_zone_t "/var/named/zones(/.*)?"
-restorecon -R /var/named/zones
+# Check if SELinux is enabled
+if [[ $(getenforce) == "Enforcing" || $(getenforce) == "Permissive" ]]; then
+    echo "Applying SELinux context for BIND..."
+    semanage fcontext -a -t named_zone_t "/var/named/zones(/.*)?"
+    restorecon -R /var/named/zones
+else
+    echo "SELinux is disabled. Skipping SELinux adjustments."
+fi
+
 
 # Copy default empty zone files only if they don't exist
 [[ ! -f "$FORWARD_ZONE_FILE" ]] && cp /var/named/named.empty "$FORWARD_ZONE_FILE"
