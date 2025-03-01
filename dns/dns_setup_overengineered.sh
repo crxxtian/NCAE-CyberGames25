@@ -5,8 +5,11 @@ read -p "Team Number: " team
 read -p "Host Name: " name
 read -p "IP Address: " ip
 
-# Set the path for the forward zone file
+# Set paths for zone files
 FORWARD_ZONE_FILE="/var/named/zones/forward.ncaecybergames.org"
+REVERSE_ZONE_FILE="/var/named/zones/reverse.ncaecybergames.org"
+FORWARD_TEAM_ZONE="/var/named/zones/forward.team.net"
+REVERSE_TEAM_ZONE="/var/named/zones/reverse.team.net"
 
 # Determine the current serial number
 if [ -f "$FORWARD_ZONE_FILE" ]; then
@@ -36,32 +39,23 @@ fi
 semanage fcontext -a -t named_zone_t "/var/named/zones(/.*)?"
 restorecon -R /var/named/zones
 
-# Only update zone files if they are incorrect
-if ! grep -q "$name" "$FORWARD_ZONE_FILE" || ! grep -q "$ip" "$FORWARD_ZONE_FILE"; then
-    echo "⚠ Incorrect or outdated DNS records detected. Updating..."
-    cp /var/named/named.empty "$FORWARD_ZONE_FILE"
-    cp /var/named/named.empty /var/named/zones/reverse.ncaecybergames.org
-    cp /var/named/named.empty /var/named/zones/forward.team.net
-    cp /var/named/named.empty /var/named/zones/reverse.team.net
-else
-    echo "✅ DNS records are already correct. No changes needed."
-fi
+# Copy default empty zone files only if they don't exist
+[[ ! -f "$FORWARD_ZONE_FILE" ]] && cp /var/named/named.empty "$FORWARD_ZONE_FILE"
+[[ ! -f "$REVERSE_ZONE_FILE" ]] && cp /var/named/named.empty "$REVERSE_ZONE_FILE"
+[[ ! -f "$FORWARD_TEAM_ZONE" ]] && cp /var/named/named.empty "$FORWARD_TEAM_ZONE"
+[[ ! -f "$REVERSE_TEAM_ZONE" ]] && cp /var/named/named.empty "$REVERSE_TEAM_ZONE"
 
 # Configure named.conf with security enhancements
 cat << EOF > /etc/named.conf
 options {
     directory "/var/named";
 
-    // Prevent unauthorized zone updates
     allow-update { none; };
 
-    // Allow DNS queries only from trusted networks
     allow-query { 192.168.6.0/24; 172.18.0.0/16; localhost; };
 
-    // Allow recursion for internal users only (Prevents open DNS resolver abuse)
     allow-recursion { 192.168.6.0/24; 172.18.0.0/16; localhost; };
 
-    // Other security settings
     dnssec-enable yes;
     dnssec-validation yes;
 };
@@ -87,7 +81,7 @@ zone "$team.168.192.in-addr.arpa" IN {
 };
 EOF
 
-# Configure Forward Zone for ncaecybergames.org
+# Configure Forward Zone for External DNS (teamX.ncaecybergames.org)
 cat << EOF > "$FORWARD_ZONE_FILE"
 \$TTL    86400
 @       IN      SOA     team$team.ncaecybergames.org. root.(
@@ -105,6 +99,56 @@ files   IN      A       172.18.14.$team
 shell   IN      A       172.18.14.$team
 EOF
 
+# Configure Reverse Zone for External DNS
+cat << EOF > "$REVERSE_ZONE_FILE"
+\$TTL    86400
+@       IN      SOA     team$team.ncaecybergames.org. root.team$team.ncaecybergames.org.(
+                          $SERIAL         ; Serial
+                         604800         ; Refresh
+                          86400         ; Retry
+                        2419200         ; Expire
+                          86400 )       ; Negative Cache TTL
+;
+@       IN      NS      $name.
+$team.13        IN      PTR     ns1.team$team.ncaecybergames.org.
+$team.13        IN      PTR     www.team$team.ncaecybergames.org.
+$team.14        IN      PTR     files.team$team.ncaecybergames.org.
+$team.14        IN      PTR     shell.team$team.ncaecybergames.org.
+EOF
+
+# Configure Forward Zone for Internal DNS (teamX.net)
+cat << EOF > "$FORWARD_TEAM_ZONE"
+\$TTL    86400
+@       IN      SOA     team$team.net. root.(
+                          $SERIAL         ; Serial
+                         604800         ; Refresh
+                          86400         ; Retry
+                        2419200         ; Expire
+                          86400 )       ; Negative Cache TTL
+;
+@       IN      NS      $name
+$name   IN      A       $ip
+ns1     IN      A       192.168.$team.12
+www     IN      A       192.168.$team.5
+db1     IN      A       192.168.$team.7
+EOF
+
+# Configure Reverse Zone for Internal DNS
+cat << EOF > "$REVERSE_TEAM_ZONE"
+\$TTL    86400
+@       IN      SOA     team$team.net. root.team$team.net.(
+                          $SERIAL         ; Serial
+                         604800         ; Refresh
+                          86400         ; Retry
+                        2419200         ; Expire
+                          86400 )       ; Negative Cache TTL
+;
+@       IN      NS      $name.
+12      IN      PTR     ns1.team$team.net.
+7       IN      PTR     db1.team$team.net.
+5       IN      PTR     www.team$team.net.
+EOF
+
 # Set correct ownership and permissions
 chown -R named:named /var/named/zones
 chmod -R 640 /var/named/zones
@@ -114,32 +158,22 @@ if ! systemctl is-active --quiet named; then
     echo "Restarting named service..."
     systemctl restart named
 else
-    echo "✅ No restart needed. DNS is already running correctly."
+    echo "No restart needed. DNS is already running correctly."
 fi
 
 # Verify service status
 echo "Verifying BIND DNS service..."
 systemctl status named --no-pager
 
-# Verification: Test DNS resolution
+# Test DNS resolution
 echo "Testing DNS queries..."
 DNS_SERVER="192.168.$team.12"
 
-# Test forward lookups
 nslookup www.team$team.net $DNS_SERVER
 nslookup db1.team$team.net $DNS_SERVER
 nslookup www.team$team.ncaecybergames.org 172.18.13.$team
 
-# Test reverse lookups
 nslookup 192.168.$team.5 $DNS_SERVER
 nslookup 172.18.13.$team 172.18.13.$team
 
-# Display summary
-if systemctl is-active --quiet named; then
-    echo "✅ BIND is running."
-else
-    echo "❌ ERROR: BIND is NOT running!"
-fi
-
-echo "✅ DNS verification completed."
-echo "To manually test, use: nslookup www.team$team.net $DNS_SERVER"
+echo "DNS verification completed."
